@@ -28,8 +28,6 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
 // Used by WriteCharsLegacy.
 #define IS_GLYPH_CHAR(wch) (((wch) >= L' ') && ((wch) != 0x007F))
 
-constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
-
 // Routine Description:
 // - This routine updates the cursor position.  Its input is the non-special
 //   cased new location of the cursor.  For example, if the cursor were being
@@ -333,13 +331,19 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
                                         const DWORD dwFlags,
                                         _Inout_opt_ PSHORT const psScrollY)
 {
+    static constexpr auto DEFAULT_BUFFER_SIZE{ 120 }; // chosen to match the screen width
+    //wchar_t pmrBuffer[DEFAULT_BUFFER_SIZE + sizeof(std::wstring)]; // allocated with enough space for a string header, too
+    char pmrBuffer[(sizeof(wchar_t) * DEFAULT_BUFFER_SIZE) + sizeof(std::wstring)]; // allocated with enough space for a string header, too
+    std::pmr::monotonic_buffer_resource pmrPool{ &pmrBuffer, std::extent<decltype(pmrBuffer)>::value, til::pmr::get_default_resource() };
+
     const CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
     TextBuffer& textBuffer = screenInfo.GetTextBuffer();
     Cursor& cursor = textBuffer.GetCursor();
     COORD CursorPosition = cursor.GetPosition();
     NTSTATUS Status = STATUS_SUCCESS;
     SHORT XPosition;
-    WCHAR LocalBuffer[LOCAL_BUFFER_SIZE];
+    std::pmr::wstring localBuffer{ &pmrPool };
+    localBuffer.reserve(DEFAULT_BUFFER_SIZE); // 120 characters ought to be enough (of a default) for anyone
     size_t TempNumSpaces = 0;
     const bool fUnprocessed = WI_IsFlagClear(screenInfo.OutputMode, ENABLE_PROCESSED_OUTPUT);
     const bool fWrapAtEOL = WI_IsFlagSet(screenInfo.OutputMode, ENABLE_WRAP_AT_EOL_OUTPUT);
@@ -387,8 +391,8 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
         // As an optimization, collect characters in buffer and print out all at once.
         XPosition = cursor.GetPosition().X;
         size_t i = 0;
-        wchar_t* LocalBufPtr = LocalBuffer;
-        while (*pcb < BufferSize && i < LOCAL_BUFFER_SIZE && XPosition < coordScreenBufferSize.X)
+        localBuffer.erase();
+        while (*pcb < BufferSize && XPosition < coordScreenBufferSize.X)
         {
 #pragma prefast(suppress : 26019, "Buffer is taken in multiples of 2. Validation is ok.")
             const wchar_t Char = *lpString;
@@ -397,9 +401,9 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
             {
                 if (IsGlyphFullWidth(Char))
                 {
-                    if (i < (LOCAL_BUFFER_SIZE - 1) && XPosition < (coordScreenBufferSize.X - 1))
+                    if (XPosition < (coordScreenBufferSize.X - 1))
                     {
-                        *LocalBufPtr++ = Char;
+                        localBuffer.push_back(Char);
 
                         // cursor adjusted by 2 because the char is double width
                         XPosition += 2;
@@ -413,8 +417,7 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
                 }
                 else
                 {
-                    *LocalBufPtr = Char;
-                    LocalBufPtr++;
+                    localBuffer.push_back(Char);
                     XPosition++;
                     i++;
                     pwchBuffer++;
@@ -455,10 +458,9 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
                         goto EndWhile;
                     }
 
-                    for (ULONG j = 0; j < TabSize && i < LOCAL_BUFFER_SIZE; j++, i++)
+                    for (ULONG j = 0; j < TabSize; j++, i++)
                     {
-                        *LocalBufPtr = UNICODE_SPACE;
-                        LocalBufPtr++;
+                        localBuffer.push_back(UNICODE_SPACE);
                     }
 
                     pwchBuffer++;
@@ -473,30 +475,18 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
                     if ((dwFlags & WC_ECHO) && (IS_CONTROL_CHAR(RealUnicodeChar)))
                     {
                     CtrlChar:
-                        if (i < (LOCAL_BUFFER_SIZE - 1))
-                        {
-                            *LocalBufPtr = (WCHAR)'^';
-                            LocalBufPtr++;
-                            XPosition++;
-                            i++;
+                        localBuffer.push_back(L'^');
+                        localBuffer.push_back(RealUnicodeChar + L'@');
+                        XPosition += 2;
+                        i += 2;
 
-                            *LocalBufPtr = (WCHAR)(RealUnicodeChar + (WCHAR)'@');
-                            LocalBufPtr++;
-                            XPosition++;
-                            i++;
-
-                            pwchBuffer++;
-                        }
-                        else
-                        {
-                            goto EndWhile;
-                        }
+                        pwchBuffer++;
                     }
                     else
                     {
                         if (Char == UNICODE_NULL)
                         {
-                            *LocalBufPtr = UNICODE_SPACE;
+                            localBuffer.push_back(UNICODE_SPACE);
                         }
                         else
                         {
@@ -507,19 +497,19 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
                             GetStringTypeW(CT_CTYPE1, &RealUnicodeChar, 1, &CharType);
                             if (WI_IsFlagSet(CharType, C1_CNTRL))
                             {
+                                localBuffer.push_back(UNICODE_SPACE); // temp space for one char
                                 ConvertOutputToUnicode(gci.OutputCP,
                                                        (LPSTR)&RealUnicodeChar,
                                                        1,
-                                                       LocalBufPtr,
+                                                       &localBuffer.back(),
                                                        1);
                             }
                             else
                             {
-                                *LocalBufPtr = Char;
+                                localBuffer.push_back(Char);
                             }
                         }
 
-                        LocalBufPtr++;
                         XPosition++;
                         i++;
                         pwchBuffer++;
@@ -542,7 +532,7 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
             }
 
             // line was wrapped if we're writing up to the end of the current row
-            OutputCellIterator it(std::wstring_view(LocalBuffer, i), Attributes);
+            OutputCellIterator it(std::wstring_view{ localBuffer }, Attributes);
             const auto itEnd = screenInfo.Write(it);
 
             // Notify accessibility
