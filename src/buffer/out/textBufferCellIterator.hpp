@@ -16,11 +16,11 @@ Author(s):
 #pragma once
 
 #include "AttrRowIterator.hpp"
-#include "CharRow.hpp"
 #include "OutputCellView.hpp"
 #include "../../types/inc/viewport.hpp"
 
 class TextBuffer;
+class ROW;
 
 class TextBufferCellIterator
 {
