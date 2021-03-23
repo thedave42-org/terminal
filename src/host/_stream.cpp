@@ -324,7 +324,7 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
 [[nodiscard]] NTSTATUS WriteCharsLegacy(SCREEN_INFORMATION& screenInfo,
                                         _In_range_(<=, pwchBuffer) const wchar_t* const pwchBufferBackupLimit,
                                         _In_ const wchar_t* pwchBuffer,
-                                        _In_reads_bytes_(*pcb) const wchar_t* pwchRealUnicode,
+                                        _In_reads_bytes_(*pcb) const wchar_t* const pwchRealUnicode,
                                         _Inout_ size_t* const pcb,
                                         _Out_opt_ size_t* const pcSpaces,
                                         const SHORT sOriginalXPosition,
@@ -390,14 +390,12 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
 
         // As an optimization, collect characters in buffer and print out all at once.
         XPosition = cursor.GetPosition().X;
-        size_t i = 0;
         localBuffer.erase();
         while (*pcb < BufferSize && XPosition < coordScreenBufferSize.X)
         {
 #pragma prefast(suppress : 26019, "Buffer is taken in multiples of 2. Validation is ok.")
             const wchar_t Char = *lpString;
-            const wchar_t RealUnicodeChar = *pwchRealUnicode;
-            if (IS_GLYPH_CHAR(RealUnicodeChar) || fUnprocessed)
+            if (IS_GLYPH_CHAR(Char) || fUnprocessed)
             {
                 if (IsGlyphFullWidth(Char))
                 {
@@ -407,7 +405,6 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
 
                         // cursor adjusted by 2 because the char is double width
                         XPosition += 2;
-                        i += 1;
                         pwchBuffer++;
                     }
                     else
@@ -419,14 +416,13 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
                 {
                     localBuffer.push_back(Char);
                     XPosition++;
-                    i++;
                     pwchBuffer++;
                 }
             }
             else
             {
                 FAIL_FAST_IF(!(WI_IsFlagSet(screenInfo.OutputMode, ENABLE_PROCESSED_OUTPUT)));
-                switch (RealUnicodeChar)
+                switch (Char)
                 {
                 case UNICODE_BELL:
                     if (dwFlags & WC_ECHO)
@@ -458,7 +454,7 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
                         goto EndWhile;
                     }
 
-                    for (ULONG j = 0; j < TabSize; j++, i++)
+                    for (ULONG j = 0; j < TabSize; j++)
                     {
                         localBuffer.push_back(UNICODE_SPACE);
                     }
@@ -472,13 +468,12 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
                 default:
 
                     // if char is ctrl char, write ^char.
-                    if ((dwFlags & WC_ECHO) && (IS_CONTROL_CHAR(RealUnicodeChar)))
+                    if ((dwFlags & WC_ECHO) && (IS_CONTROL_CHAR(Char)))
                     {
                     CtrlChar:
                         localBuffer.push_back(L'^');
-                        localBuffer.push_back(RealUnicodeChar + L'@');
+                        localBuffer.push_back(Char + L'@');
                         XPosition += 2;
-                        i += 2;
 
                         pwchBuffer++;
                     }
@@ -494,12 +489,12 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
                             // convert to corresponding OEM Glyph Chars
                             WORD CharType;
 
-                            GetStringTypeW(CT_CTYPE1, &RealUnicodeChar, 1, &CharType);
+                            GetStringTypeW(CT_CTYPE1, &Char, 1, &CharType);
                             if (WI_IsFlagSet(CharType, C1_CNTRL))
                             {
                                 localBuffer.push_back(UNICODE_SPACE); // temp space for one char
                                 ConvertOutputToUnicode(gci.OutputCP,
-                                                       (LPSTR)&RealUnicodeChar,
+                                                       (LPSTR)&Char,
                                                        1,
                                                        &localBuffer.back(),
                                                        1);
@@ -511,32 +506,31 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
                         }
 
                         XPosition++;
-                        i++;
                         pwchBuffer++;
                     }
                 }
             }
             lpString++;
-            pwchRealUnicode++;
             *pcb += sizeof(WCHAR);
         }
     EndWhile:
-        if (i != 0)
+        if (!localBuffer.empty())
         {
             CursorPosition = cursor.GetPosition();
 
             // Make sure we don't write past the end of the buffer.
-            if (i > gsl::narrow_cast<size_t>(coordScreenBufferSize.X) - CursorPosition.X)
-            {
-                i = gsl::narrow_cast<size_t>(coordScreenBufferSize.X) - CursorPosition.X;
-            }
+            //if (i > gsl::narrow_cast<size_t>(coordScreenBufferSize.X) - CursorPosition.X)
+            //{
+            //i = gsl::narrow_cast<size_t>(coordScreenBufferSize.X) - CursorPosition.X;
+            //}
+            //TODO(DH) FIGURE OUT IF <I> WAS IMPORTANT HERE
 
             // line was wrapped if we're writing up to the end of the current row
             OutputCellIterator it(std::wstring_view{ localBuffer }, Attributes);
             const auto itEnd = screenInfo.Write(it);
 
             // Notify accessibility
-            screenInfo.NotifyAccessibilityEventing(CursorPosition.X, CursorPosition.Y, CursorPosition.X + gsl::narrow<SHORT>(i - 1), CursorPosition.Y);
+            screenInfo.NotifyAccessibilityEventing(CursorPosition.X, CursorPosition.Y, CursorPosition.X + gsl::narrow<SHORT>(localBuffer.size() - 1), CursorPosition.Y);
 
             // The number of "spaces" or "cells" we have consumed needs to be reported and stored for later
             // when/if we need to erase the command line.
@@ -612,6 +606,7 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
                     return NTSTATUS_FROM_HRESULT(wil::ResultFromCaughtException());
                 }
 
+                size_t i{};
                 for (i = 0, Tmp2 = buffer.get(), Tmp = pwchBufferBackupLimit;
                      i < bufferSize;
                      i++, Tmp++)
@@ -864,7 +859,6 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
 
         *pcb += sizeof(WCHAR);
         lpString++;
-        pwchRealUnicode++;
     }
 
     if (nullptr != pcSpaces)
