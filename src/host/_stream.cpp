@@ -556,10 +556,7 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
 
             if (*pcb == BufferSize)
             {
-                if (nullptr != pcSpaces)
-                {
-                    *pcSpaces = TempNumSpaces;
-                }
+                wil::assign_to_opt_param(pcSpaces, TempNumSpaces);
                 return STATUS_SUCCESS;
             }
             continue;
@@ -569,10 +566,7 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
             FAIL_FAST_IF(!(WI_IsFlagSet(screenInfo.OutputMode, ENABLE_PROCESSED_OUTPUT)));
 
             // this catches the case where the number of backspaces == the number of characters.
-            if (nullptr != pcSpaces)
-            {
-                *pcSpaces = TempNumSpaces;
-            }
+            wil::assign_to_opt_param(pcSpaces, TempNumSpaces);
             return STATUS_SUCCESS;
         }
 
@@ -861,10 +855,7 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
         lpString++;
     }
 
-    if (nullptr != pcSpaces)
-    {
-        *pcSpaces = TempNumSpaces;
-    }
+    wil::assign_to_opt_param(pcSpaces, TempNumSpaces);
 
     return STATUS_SUCCESS;
 }
