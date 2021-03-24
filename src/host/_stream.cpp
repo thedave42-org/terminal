@@ -454,10 +454,7 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
                         goto EndWhile;
                     }
 
-                    for (ULONG j = 0; j < TabSize; j++)
-                    {
-                        localBuffer.push_back(UNICODE_SPACE);
-                    }
+                    localBuffer.append(TabSize, UNICODE_SPACE);
 
                     pwchBuffer++;
                     break;
@@ -534,8 +531,12 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
 
             // The number of "spaces" or "cells" we have consumed needs to be reported and stored for later
             // when/if we need to erase the command line.
-            TempNumSpaces += itEnd.GetCellDistance(it);
-            CursorPosition.X = XPosition;
+            const auto cellDistance = itEnd.GetCellDistance(it);
+            TempNumSpaces += cellDistance;
+            // Originally, we used [XPosition] here to move the cursor forward. That is only correct
+            // if our estimate is perfect. We have the machinery to make the estimate perfect, but we
+            // can also simply advance the cursor by the real number of cells that was written.
+            CursorPosition.X += gsl::narrow_cast<SHORT>(cellDistance);
 
             // enforce a delayed newline if we're about to pass the end and the WC_DELAY_EOL_WRAP flag is set.
             if (WI_IsFlagSet(dwFlags, WC_DELAY_EOL_WRAP) && CursorPosition.X >= coordScreenBufferSize.X && fWrapAtEOL)
@@ -554,6 +555,8 @@ using Microsoft::Console::VirtualTerminal::StateMachine;
                 Status = AdjustCursorPosition(screenInfo, CursorPosition, WI_IsFlagSet(dwFlags, WC_KEEP_CURSOR_VISIBLE), psScrollY);
             }
 
+            // If we have written the entire buffer in the "print one line with no control chars" handler,
+            // we are free to simply exit. Neat!
             if (*pcb == BufferSize)
             {
                 wil::assign_to_opt_param(pcSpaces, TempNumSpaces);
