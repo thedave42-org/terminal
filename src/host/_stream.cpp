@@ -318,9 +318,9 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
 // - pcb - On input, number of bytes to write.  On output, number of bytes written.
 // - pcSpaces - On output, the number of spaces consumed by the written characters.
 // - dwFlags -
-//      WC_DESTRUCTIVE_BACKSPACE backspace overwrites characters.
-//      WC_KEEP_CURSOR_VISIBLE   change window origin desirable when hit rt. edge
-//      WC_ECHO                  if called by Read (echoing characters)
+//      WC_DESTRUCTIVE_BACKSPACE   backspace overwrites characters.
+//      WC_KEEP_CURSOR_VISIBLE     change window origin desirable when hit rt. edge
+//      WC_PRINTABLE_CONTROL_CHARS if control characters should be expanded (as in, to "^X")
 // Return Value:
 // Note:
 // - This routine does not process tabs and backspace properly.  That code will be implemented as part of the line editing services.
@@ -394,10 +394,14 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
         {
 #pragma prefast(suppress : 26019, "Buffer is taken in multiples of 2. Validation is ok.")
             const wchar_t Char = *lpString;
+            // WCL-NOTE: We believe RealUnicodeChar to be identical to Char, because we believe pwchRealUnicode
+            // WCL-NOTE: to be identical to lpString. They are incremented in lockstep, never separately, and lpString
+            // WCL-NOTE: is initialized from pwchRealUnicode.
             const wchar_t RealUnicodeChar = *pwchRealUnicode;
             const auto cbuf{ Utf16Parser::ParseNext(std::wstring_view{ pwchRealUnicode, (BufferSize / sizeof(WCHAR)) - static_cast<size_t>(pwchRealUnicode - base) }) };
             if (IS_GLYPH_CHAR(RealUnicodeChar) || fUnprocessed)
             {
+                // WCL-NOTE: This operates on a single code unit instead of a whole codepoint. It will mis-measure surrogate pairs.
                 if (IsGlyphFullWidth(cbuf))
                 {
                     if (i < (LOCAL_BUFFER_SIZE - 1) && XPosition < (coordScreenBufferSize.X - 1))
@@ -428,7 +432,7 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
                 switch (RealUnicodeChar)
                 {
                 case UNICODE_BELL:
-                    if (dwFlags & WC_ECHO)
+                    if (dwFlags & WC_PRINTABLE_CONTROL_CHARS)
                     {
                         goto CtrlChar;
                     }
@@ -471,11 +475,13 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
                 default:
 
                     // if char is ctrl char, write ^char.
-                    if ((dwFlags & WC_ECHO) && (IS_CONTROL_CHAR(RealUnicodeChar)))
+                    if ((dwFlags & WC_PRINTABLE_CONTROL_CHARS) && (IS_CONTROL_CHAR(RealUnicodeChar)))
                     {
                     CtrlChar:
                         if (i < (LOCAL_BUFFER_SIZE - 1))
                         {
+                            // WCL-NOTE: We do not properly measure that there is space for two characters
+                            // WCL-NOTE: left on the screen.
                             local.append(1, L'^');
                             XPosition++;
                             i++;
@@ -516,6 +522,10 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
                             }
                             else
                             {
+                                // WCL-NOTE: We should never hit this.
+                                // WCL-NOTE: 1. Normal characters are handled via the early check for IS_GLYPH_CHAR
+                                // WCL-NOTE: 2. Control characters are handled via the CtrlChar label (if WC_PRINTABLE_CONTROL_CHARS is on)
+                                // WCL-NOTE:    And if they are control characters they will trigger the C1_CNTRL check above.
                                 local.append(1, Char);
                             }
                         }
@@ -536,6 +546,7 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
             CursorPosition = cursor.GetPosition();
 
             // Make sure we don't write past the end of the buffer.
+            // WCL-NOTE: This check uses a code unit count instead of a column count. That is incorrect.
             if (i > gsl::narrow_cast<size_t>(coordScreenBufferSize.X) - CursorPosition.X)
             {
                 i = gsl::narrow_cast<size_t>(coordScreenBufferSize.X) - CursorPosition.X;
@@ -551,6 +562,9 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
             // The number of "spaces" or "cells" we have consumed needs to be reported and stored for later
             // when/if we need to erase the command line.
             TempNumSpaces += itEnd.GetCellDistance(it);
+            // WCL-NOTE: We are using the "estimated" X position delta instead of the actual delta from
+            // WCL-NOTE: the iterator. It is not clear why. If they differ, the cursor ends up in the
+            // WCL-NOTE: wrong place (typically inside another character).
             CursorPosition.X += (SHORT)TempNumSpaces;
             //XPosition;
 
@@ -571,6 +585,8 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
                 Status = AdjustCursorPosition(screenInfo, CursorPosition, WI_IsFlagSet(dwFlags, WC_KEEP_CURSOR_VISIBLE), psScrollY);
             }
 
+            // WCL-NOTE: If we have processed the entire input string during our "fast one-line print" handler,
+            // WCL-NOTE: we are done as there is nothing more to do. Neat!
             if (*pcb == BufferSize)
             {
                 if (nullptr != pcSpaces)
@@ -583,6 +599,10 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
         }
         else if (*pcb >= BufferSize)
         {
+            // WCL-NOTE: This case looks like it is never encountered, but it *is* if WC_PRINTABLE_CONTROL_CHARS is off.
+            // WCL-NOTE: If the string is entirely nonprinting control characters, there will be
+            // WCL-NOTE: no output in the buffer (LocalBuffer; i == 0) but we will have processed
+            // WCL-NOTE: "every" character. We can just bail out and report the number of spaces consumed.
             FAIL_FAST_IF(!(WI_IsFlagSet(screenInfo.OutputMode, ENABLE_PROCESSED_OUTPUT)));
 
             // this catches the case where the number of backspaces == the number of characters.
@@ -731,7 +751,7 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
                                         pwchBuffer + 1 - pwchBufferBackupLimit,
                                         gsl::narrow_cast<size_t>(coordScreenBufferSize.X) - sOriginalXPosition,
                                         sOriginalXPosition,
-                                        dwFlags & WC_ECHO))
+                                        dwFlags & WC_PRINTABLE_CONTROL_CHARS))
                 {
                     CursorPosition.X = coordScreenBufferSize.X - 1;
                     CursorPosition.Y = (SHORT)(cursor.GetPosition().Y - 1);
@@ -898,9 +918,9 @@ constexpr unsigned int LOCAL_BUFFER_SIZE = 100;
 // - pcb - On input, number of bytes to write.  On output, number of bytes written.
 // - pcSpaces - On output, the number of spaces consumed by the written characters.
 // - dwFlags -
-//      WC_DESTRUCTIVE_BACKSPACE backspace overwrites characters.
-//      WC_KEEP_CURSOR_VISIBLE   change window origin (viewport) desirable when hit rt. edge
-//      WC_ECHO                  if called by Read (echoing characters)
+//      WC_DESTRUCTIVE_BACKSPACE   backspace overwrites characters.
+//      WC_KEEP_CURSOR_VISIBLE     change window origin (viewport) desirable when hit rt. edge
+//      WC_PRINTABLE_CONTROL_CHARS if control characters should be expanded (as in, to "^X")
 // Return Value:
 // Note:
 // - This routine does not process tabs and backspace properly.  That code will be implemented as part of the line editing services.

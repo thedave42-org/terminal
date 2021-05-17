@@ -8,6 +8,7 @@ namespace Microsoft.Terminal.Settings.Model
         Boolean Equals(IActionArgs other);
         String GenerateName();
         IActionArgs Copy();
+        UInt64 Hash();
     };
 
     interface IActionEventArgs
@@ -77,6 +78,27 @@ namespace Microsoft.Terminal.Settings.Model
         CommandLine
     };
 
+    enum TabSwitcherMode
+    {
+        MostRecentlyUsed,
+        InOrder,
+        Disabled,
+    };
+
+    enum DesktopBehavior
+    {
+        Any,
+        ToCurrent,
+        OnCurrent,
+    };
+
+    enum MonitorBehavior
+    {
+        Any,
+        ToCurrent,
+        ToMouse,
+    };
+
     [default_interface] runtimeclass NewTerminalArgs {
         NewTerminalArgs();
         NewTerminalArgs(Int32 profileIndex);
@@ -93,9 +115,12 @@ namespace Microsoft.Terminal.Settings.Model
 
         Windows.Foundation.IReference<Boolean> SuppressApplicationTitle;
 
+        String ColorScheme;
+
         Boolean Equals(NewTerminalArgs other);
         String GenerateName();
         String ToCommandline();
+        UInt64 Hash();
     };
 
     [default_interface] runtimeclass ActionEventArgs : IActionEventArgs
@@ -145,6 +170,7 @@ namespace Microsoft.Terminal.Settings.Model
 
     [default_interface] runtimeclass SplitPaneArgs : IActionArgs
     {
+        SplitPaneArgs(SplitType splitMode, SplitState split, Double size, NewTerminalArgs terminalArgs);
         SplitPaneArgs(SplitState split, Double size, NewTerminalArgs terminalArgs);
         SplitPaneArgs(SplitState split, NewTerminalArgs terminalArgs);
         SplitPaneArgs(SplitType splitMode);
@@ -163,6 +189,7 @@ namespace Microsoft.Terminal.Settings.Model
 
     [default_interface] runtimeclass SetColorSchemeArgs : IActionArgs
     {
+        SetColorSchemeArgs(String name);
         String SchemeName { get; };
     };
 
@@ -225,5 +252,29 @@ namespace Microsoft.Terminal.Settings.Model
     {
         NewWindowArgs(NewTerminalArgs terminalArgs);
         NewTerminalArgs TerminalArgs { get; };
+    };
+
+    [default_interface] runtimeclass PrevTabArgs : IActionArgs
+    {
+        Windows.Foundation.IReference<TabSwitcherMode> SwitcherMode;
+    };
+
+    [default_interface] runtimeclass NextTabArgs : IActionArgs
+    {
+        Windows.Foundation.IReference<TabSwitcherMode> SwitcherMode;
+    };
+
+    [default_interface] runtimeclass RenameWindowArgs : IActionArgs
+    {
+        String Name { get; };
+    };
+
+    [default_interface] runtimeclass GlobalSummonArgs : IActionArgs
+    {
+        String Name { get; };
+        DesktopBehavior Desktop { get; };
+        MonitorBehavior Monitor { get; };
+        Boolean ToggleVisibility { get; };
+        UInt32 DropdownDuration { get; };
     };
 }
