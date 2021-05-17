@@ -50,8 +50,7 @@ enum class DelimiterClass
 class ROW final
 {
 public:
-    ROW(const SHORT rowId, const unsigned short rowWidth, const TextAttribute fillAttribute, TextBuffer* const pParent)
-    noexcept;
+    ROW(const SHORT rowId, const unsigned short rowWidth, const TextAttribute fillAttribute, TextBuffer* const pParent);
 
     size_t size() const noexcept { return _rowWidth; }
 

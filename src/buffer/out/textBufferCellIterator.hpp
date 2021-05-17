@@ -15,7 +15,7 @@ Author(s):
 
 #pragma once
 
-#include "AttrRowIterator.hpp"
+#include "AttrRow.hpp"
 #include "OutputCellView.hpp"
 #include "../../types/inc/viewport.hpp"
 
@@ -55,7 +55,7 @@ protected:
     OutputCellView _view;
 
     const ROW* _pRow;
-    AttrRowIterator _attrIter;
+    ATTR_ROW::const_iterator _attrIter;
     std::reference_wrapper<const TextBuffer> _buffer;
     Microsoft::Console::Types::Viewport _bounds;
     bool _exceeded;
