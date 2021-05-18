@@ -38,7 +38,7 @@ bool ROW::Reset(const TextAttribute Attr)
     _wrapForced = false;
     _doubleBytePadded = false;
 #if BACKING_BUFFER_IS_STRINGLIKE
-    _cwid.replace(0, _rowWidth, _rowWidth, 1);
+    _cwid.replace(0, _rowWidth, { 1, _rowWidth }); // replace entire RLE with one run
 #else
     _cwid.resize(_rowWidth);
     _cwid.fill(1);
@@ -66,7 +66,12 @@ bool ROW::Reset(const TextAttribute Attr)
 {
     _data.resize(width, L' ');
 #if BACKING_BUFFER_IS_STRINGLIKE
-    _cwid.resize(width, 1);
+    auto oldEnd{ _cwid.size() };
+    _cwid.resize_trailing_extent(width);
+    if (width > oldEnd)
+    {
+        _cwid.replace(oldEnd, width, { 1, gsl::narrow_cast<uint16_t>(width - oldEnd) });
+    }
 #else
     _cwid.resize(width);
     _cwid.fill(1);
@@ -169,7 +174,7 @@ OutputCellIterator ROW::WriteCells(OutputCellIterator it, const size_t index, co
             {
                 if (!it->DbcsAttr().IsTrailing())
                 {
-                    auto d = it->DbcsAttr().IsSingle() ? 1 : 2;
+                    uint16_t d = it->DbcsAttr().IsSingle() ? 1 : 2;
                     std::tie(ibegin, ihintcol) = WriteGlyphAtMeasured(currentIndex, d, it->Chars(), ibegin, ihintcol);
                     currentIndex += d - 1;
                     colorUses += d - 1;
