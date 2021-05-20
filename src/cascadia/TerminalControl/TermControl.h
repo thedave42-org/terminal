@@ -138,6 +138,8 @@ namespace winrt::Microsoft::Terminal::Control::implementation
         // in order to safely resolve this unsafe pointer dependency. Otherwise a deallocated
         // IRenderEngine is accessed when ControlCore calls Renderer::TriggerTeardown.
         // (C++ class members are destroyed in reverse order.)
+        // Further, the TermControlAutomationPeer must be destructed after _uiaEngine!
+        winrt::Windows::UI::Xaml::Automation::Peers::AutomationPeer _automationPeer{ nullptr };
         std::unique_ptr<::Microsoft::Console::Render::UiaEngine> _uiaEngine;
 
         winrt::com_ptr<ControlCore> _core;
@@ -149,9 +151,9 @@ namespace winrt::Microsoft::Terminal::Control::implementation
         bool _focused;
         bool _initializedTerminal;
 
-        std::shared_ptr<ThrottledFunc<>> _tsfTryRedrawCanvas;
-        std::shared_ptr<ThrottledFunc<>> _updatePatternLocations;
-        std::shared_ptr<ThrottledFunc<>> _playWarningBell;
+        std::shared_ptr<ThrottledFuncTrailing<>> _tsfTryRedrawCanvas;
+        std::shared_ptr<ThrottledFuncTrailing<>> _updatePatternLocations;
+        std::shared_ptr<ThrottledFuncLeading> _playWarningBell;
 
         struct ScrollBarUpdate
         {
@@ -160,7 +162,7 @@ namespace winrt::Microsoft::Terminal::Control::implementation
             double newMinimum;
             double newViewportSize;
         };
-        std::shared_ptr<ThrottledFunc<ScrollBarUpdate>> _updateScrollBar;
+        std::shared_ptr<ThrottledFuncTrailing<ScrollBarUpdate>> _updateScrollBar;
         bool _isInternalScrollBarUpdate;
 
         // Auto scroll occurs when user, while selecting, drags cursor outside viewport. View is then scrolled to 'follow' the cursor.

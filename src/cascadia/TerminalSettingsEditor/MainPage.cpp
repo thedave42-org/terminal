@@ -286,14 +286,7 @@ namespace winrt::Microsoft::Terminal::Settings::Editor::implementation
         }
         else if (clickedItemTag == actionsTag)
         {
-            auto actionsState{ winrt::make<ActionsPageNavigationState>(_settingsClone) };
-            actionsState.OpenJson([weakThis = get_weak()](auto&&, auto&& arg) {
-                if (auto self{ weakThis.get() })
-                {
-                    self->_OpenJsonHandlers(nullptr, arg);
-                }
-            });
-            contentFrame().Navigate(xaml_typename<Editor::Actions>(), actionsState);
+            contentFrame().Navigate(xaml_typename<Editor::Actions>(), winrt::make<ActionsPageNavigationState>(_settingsClone));
         }
         else if (clickedItemTag == colorSchemesTag)
         {
@@ -377,13 +370,9 @@ namespace winrt::Microsoft::Terminal::Settings::Editor::implementation
         addProfileItem.Content(box_value(RS_(L"Nav_AddNewProfile/Content")));
         addProfileItem.Tag(box_value(addProfileTag));
 
-        // Wrap this icon up in a IconSourceElement, so we can bind to it in the
-        // Header above the Pivot.
-        WUX::Controls::IconSourceElement icon;
-        FontIconSource fontIcon;
+        FontIcon icon;
         // This is the "Add" symbol
-        fontIcon.Glyph(L"\xE710");
-        icon.IconSource(fontIcon);
+        icon.Glyph(L"\xE710");
         addProfileItem.Icon(icon);
 
         SettingsNav().MenuItems().Append(addProfileItem);
