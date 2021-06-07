@@ -115,7 +115,7 @@ static KeyChord _fromString(const std::wstring_view& wstr)
 
     while (std::getline(wss, temp, L'+'))
     {
-        parts.push_back(temp);
+        parts.emplace_back(std::move(temp));
 
         // If we have > 4, something's wrong.
         if (parts.size() > MAX_CHORD_PARTS)
@@ -126,88 +126,100 @@ static KeyChord _fromString(const std::wstring_view& wstr)
 
     KeyModifiers modifiers = KeyModifiers::None;
     int32_t vkey = 0;
+    int32_t vsc = 0;
+    bool foundKey = false;
 
     // Look for ctrl, shift, alt. Anything else might be a key
     for (const auto& part : parts)
     {
         std::wstring lowercase = part;
         std::transform(lowercase.begin(), lowercase.end(), lowercase.begin(), std::towlower);
+
         if (lowercase == CTRL_KEY)
         {
             modifiers |= KeyModifiers::Ctrl;
+            continue;
         }
-        else if (lowercase == ALT_KEY)
+
+        if (lowercase == ALT_KEY)
         {
             modifiers |= KeyModifiers::Alt;
+            continue;
         }
-        else if (lowercase == SHIFT_KEY)
+
+        if (lowercase == SHIFT_KEY)
         {
             modifiers |= KeyModifiers::Shift;
+            continue;
         }
-        else if (lowercase == WIN_KEY)
+
+        if (lowercase == WIN_KEY)
         {
             modifiers |= KeyModifiers::Windows;
+            continue;
         }
-        else
-        {
-            bool foundKey = false;
-            // For potential keys, look through the pairs of strings and vkeys
-            if (part.size() == 1)
-            {
-                const wchar_t wch = part.at(0);
-                // Quick lookup: ranges of vkeys that correlate directly to a key.
-                if (wch >= L'0' && wch <= L'9')
-                {
-                    vkey = static_cast<int32_t>(wch);
-                    foundKey = true;
-                }
-                else if (wch >= L'a' && wch <= L'z')
-                {
-                    // subtract 0x20 to shift to uppercase
-                    vkey = static_cast<int32_t>(wch - 0x20);
-                    foundKey = true;
-                }
-                else if (wch >= L'A' && wch <= L'Z')
-                {
-                    vkey = static_cast<int32_t>(wch);
-                    foundKey = true;
-                }
-            }
 
-            // If we didn't find the key with a quick lookup, search the
-            // table to see if we have a matching name.
-            if (!foundKey && vkeyNamePairs.find(part) != vkeyNamePairs.end())
+        // For potential keys, look through the pairs of strings and vkeys
+        if (part.size() == 1)
+        {
+            const wchar_t wch = part.at(0);
+
+            // Quick lookup: ranges of vkeys that correlate directly to a key.
+            if (wch >= L'0' && wch <= L'9')
             {
-                vkey = vkeyNamePairs.at(part);
-                foundKey = true;
+                vkey = static_cast<int32_t>(wch);
                 break;
             }
 
-            // If we haven't found a key, attempt a keyboard mapping
-            if (!foundKey && part.size() == 1)
+            if (wch >= L'a' && wch <= L'z')
             {
-                auto oemVk = VkKeyScanW(part[0]);
-                if (oemVk != -1)
-                {
-                    vkey = oemVk & 0xFF;
-                    auto oemModifiers = (oemVk & 0xFF00) >> 8;
-                    // We're using WI_SetFlagIf instead of WI_UpdateFlag because we want to be strictly additive
-                    // to the user's specified modifiers. ctrl+| should be the same as ctrl+shift+\,
-                    // but if we used WI_UpdateFlag, ctrl+shift+\ would turn _off_ Shift because \ doesn't
-                    // require it.
-                    WI_SetFlagIf(modifiers, KeyModifiers::Shift, WI_IsFlagSet(oemModifiers, 1U));
-                    WI_SetFlagIf(modifiers, KeyModifiers::Ctrl, WI_IsFlagSet(oemModifiers, 2U));
-                    WI_SetFlagIf(modifiers, KeyModifiers::Alt, WI_IsFlagSet(oemModifiers, 4U));
-                    foundKey = true;
-                }
+                // subtract 0x20 to shift to uppercase
+                vkey = static_cast<int32_t>(wch - 0x20);
+                break;
             }
 
-            // If we weren't able to find a match, throw an exception.
-            if (!foundKey)
+            if (wch >= L'A' && wch <= L'Z')
             {
-                throw winrt::hresult_invalid_argument();
+                vkey = static_cast<int32_t>(wch);
+                break;
             }
         }
+
+        // If we didn't find the key with a quick lookup, search the
+        // table to see if we have a matching name.
+        if (vkeyNamePairs.find(part) != vkeyNamePairs.end())
+        {
+            vkey = vkeyNamePairs.at(part);
+            break;
+        }
+
+        // If we haven't found a key, attempt a keyboard mapping
+        if (part.size() == 1)
+        {
+            auto oemVk = VkKeyScanW(part[0]);
+            if (oemVk != -1)
+            {
+                vkey = oemVk & 0xFF;
+                auto oemModifiers = (oemVk & 0xFF00) >> 8;
+                // We're using WI_SetFlagIf instead of WI_UpdateFlag because we want to be strictly additive
+                // to the user's specified modifiers. ctrl+| should be the same as ctrl+shift+\,
+                // but if we used WI_UpdateFlag, ctrl+shift+\ would turn _off_ Shift because \ doesn't
+                // require it.
+                WI_SetFlagIf(modifiers, KeyModifiers::Shift, WI_IsFlagSet(oemModifiers, 1U));
+                WI_SetFlagIf(modifiers, KeyModifiers::Ctrl, WI_IsFlagSet(oemModifiers, 2U));
+                WI_SetFlagIf(modifiers, KeyModifiers::Alt, WI_IsFlagSet(oemModifiers, 4U));
+                break;
+            }
+        }
+
+        if (til::starts_with(part, "vsc(") && til::ends_with(part, ")"))
+        {
+            const auto digits = part.substr(4, part.size() - 1);
+            vsc = static_cast<int32_t>(std::stoi(digits, nullptr, 0));
+        }
+
+        // If we weren't able to find a match, throw an exception.
+        throw winrt::hresult_invalid_argument();
     }
 
     return KeyChord{ modifiers, vkey };
