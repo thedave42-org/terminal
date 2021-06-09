@@ -857,25 +857,18 @@ namespace winrt::TerminalApp::implementation
     // - <none>
     void AppLogic::_RegisterSettingsChange()
     {
-        // Get the containing folder.
         const std::filesystem::path settingsPath{ std::wstring_view{ CascadiaSettings::SettingsPath() } };
         const auto folder = settingsPath.parent_path();
 
         _reader.create(folder.c_str(),
                        false,
-                       wil::FolderChangeEvents::All,
+                       // We want file modifications, AND when files are renamed to be
+                       // settings.json. This second case will oftentimes happen with text
+                       // editors, who will write a temp file, then rename it to be the
+                       // actual file you wrote. So listen for that too.
+                       wil::FolderChangeEvents::FileName | wil::FolderChangeEvents::LastWriteTime,
                        [this, settingsPath](wil::FolderChangeEvent event, PCWSTR fileModified) {
-                           // We want file modifications, AND when files are renamed to be
-                           // settings.json. This second case will oftentimes happen with text
-                           // editors, who will write a temp file, then rename it to be the
-                           // actual file you wrote. So listen for that too.
-                           if (!(event == wil::FolderChangeEvent::Modified ||
-                                 event == wil::FolderChangeEvent::RenameNewName ||
-                                 event == wil::FolderChangeEvent::Removed))
-                           {
-                               return;
-                           }
-
+                           std::wstring_view fileModifiedView{ fileModified };
                            std::filesystem::path modifiedFilePath = fileModified;
 
                            // Getting basename (filename.ext)
@@ -884,8 +877,10 @@ namespace winrt::TerminalApp::implementation
 
                            if (settingsBasename == modifiedBasename)
                            {
-                               this->_DispatchReloadSettings();
+                               _DispatchReloadSettings();
                            }
+
+                           winrt::Microsoft::Terminal::Settings::Model::ApplicationState::SharedInstance();
                        });
     }
 
