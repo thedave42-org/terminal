@@ -41,7 +41,9 @@ namespace til
             }
 
         private:
-            std::mutex _lock;
+            // std::mutex uses imperfect Critical Sections on Windows.
+            // --> std::shared_mutex uses SRW locks that are small and fast.
+            std::shared_mutex _lock;
             std::optional<std::tuple<Args...>> _pendingRunArgs;
         };
 
@@ -51,7 +53,7 @@ namespace til
         public:
             bool emplace()
             {
-                return _isRunPending.test_and_set(std::memory_order_relaxed);
+                return _isPending.exchange(true, std::memory_order_relaxed);
             }
 
             std::tuple<> extract()
@@ -62,11 +64,11 @@ namespace til
 
             void reset()
             {
-                _isRunPending.clear(std::memory_order_relaxed);
+                _isPending.store(false, std::memory_order_relaxed);
             }
 
         private:
-            std::atomic_flag _isRunPending;
+            std::atomic<bool> _isPending;
         };
     } // namespace details
 
@@ -78,7 +80,7 @@ namespace til
     //   cancelled and the call will be made with the new arguments instead.
     // - The function will be run on the the specified dispatcher.
     template<bool leading, typename... Args>
-    class throttled_func : public std::enable_shared_from_this<throttled_func<leading, Args...>>
+    class throttled_func
     {
     public:
         using Func = std::function<void(Args...)>;
@@ -98,7 +100,7 @@ namespace til
         throttled_func& operator=(throttled_func&&) = delete;
 
         // Method Description:
-        // - Runs the function later with the specified arguments, except if `run`
+        // - Runs the function later with the specified arguments, except if it
         //   is called again before with new arguments, in which case the new
         //   arguments will be used instead.
         // - For more information, read the class' documentation.
@@ -109,7 +111,7 @@ namespace til
         // Return Value:
         // - <none>
         template<typename... MakeArgs>
-        void run(MakeArgs&&... args)
+        void operator()(MakeArgs&&... args)
         {
             if (!_storage.emplace(std::forward<MakeArgs>(args)...))
             {
@@ -120,7 +122,7 @@ namespace til
         // Method Description:
         // - Modifies the pending arguments for the next function invocation, if
         //   there is one pending currently.
-        // - Let's say that you just called the `Run` method with some arguments.
+        // - Let's say that you just called the `operator()` method with some arguments.
         //   After the delay specified in the constructor, the function specified
         //   in the constructor will be called with these arguments.
         // - By using this method, you can modify the arguments before the function
@@ -140,6 +142,16 @@ namespace til
         void modify_pending(F f)
         {
             _storage.modify_pending(f);
+        }
+
+        // Method Description:
+        // - Makes sure that all outstanding timers are canceled and
+        //   in-progress ones are awaited on for their completion.
+        // - Reason for its existence: We have code that needs to explicitly
+        //   ensure that the throttled_func will not call the callback anymore.
+        void wait_for_completion()
+        {
+            WaitForThreadpoolTimerCallbacks(_timer.get(), true);
         }
 
     private:

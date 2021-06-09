@@ -45,9 +45,6 @@ public:                                             \
 #undef MTSM_APPLICATION_STATE_GEN
 
     private:
-        static void _synchronizeCallback(PTP_CALLBACK_INSTANCE instance, PVOID context, PTP_TIMER timer) noexcept;
-
-        void _synchronize() const noexcept;
         void _write() const noexcept;
         void _read() const noexcept;
 
@@ -56,12 +53,10 @@ public:                                             \
 #define MTSM_APPLICATION_STATE_GEN(type, name, ...) type name{ __VA_ARGS__ };
             MTSM_APPLICATION_STATE_FIELDS(MTSM_APPLICATION_STATE_GEN)
 #undef MTSM_APPLICATION_STATE_GEN
-
-            bool _writeScheduled;
         };
 
         std::filesystem::path _path;
-        wil::unique_threadpool_timer _timer;
+        til::throttled_func_trailing<> _throttler;
         til::shared_mutex<state_t> _state;
     };
 }

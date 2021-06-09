@@ -26,7 +26,7 @@ namespace winrt::Microsoft::Terminal::Settings::Model::implementation
 
     ApplicationState::ApplicationState(std::filesystem::path path) noexcept :
         _path{ std::move(path) },
-        _timer{ winrt::check_pointer(CreateThreadpoolTimer(&_synchronizeCallback, this, nullptr)) }
+        _throttler{ std::chrono::seconds(1), [this]() { _write(); } }
     {
         _read();
     }
@@ -41,7 +41,7 @@ namespace winrt::Microsoft::Terminal::Settings::Model::implementation
         //
         // If _writeScheduled is still true afterwards we must've
         // canceled a pending timer. -> _write() for the last time.
-        _timer.reset();
+        _throttler.wait_for_completion();
         if (_state.lock_shared()->_writeScheduled)
         {
             _write();
@@ -53,44 +53,24 @@ namespace winrt::Microsoft::Terminal::Settings::Model::implementation
         _read();
     }
 
-#define MTSM_APPLICATION_STATE_GEN(type, name, ...)                       \
-    type ApplicationState::name() const noexcept                          \
-    {                                                                     \
-        const auto state = _state.lock_shared();                          \
-        return state->name;                                               \
-    }                                                                     \
-                                                                          \
-    void ApplicationState::name(const type& value) noexcept               \
-    {                                                                     \
-        bool writeScheduled;                                              \
-        {                                                                 \
-            auto state = _state.lock();                                   \
-            state->name = value;                                          \
-            writeScheduled = std::exchange(state->_writeScheduled, true); \
-        }                                                                 \
-                                                                          \
-        if (!writeScheduled)                                              \
-        {                                                                 \
-            _synchronize();                                               \
-        }                                                                 \
+#define MTSM_APPLICATION_STATE_GEN(type, name, ...)         \
+    type ApplicationState::name() const noexcept            \
+    {                                                       \
+        const auto state = _state.lock_shared();            \
+        return state->name;                                 \
+    }                                                       \
+                                                            \
+    void ApplicationState::name(const type& value) noexcept \
+    {                                                       \
+        {                                                   \
+            auto state = _state.lock();                     \
+            state->name = value;                            \
+        }                                                   \
+                                                            \
+        _throttler();                                       \
     }
     MTSM_APPLICATION_STATE_FIELDS(MTSM_APPLICATION_STATE_GEN)
 #undef MTSM_APPLICATION_STATE_GEN
-
-    // Setters call this function to schedule a write to disk if _state->_writeScheduled was false.
-    // * When the ApplicationState is written _state->_writeScheduled is reset
-    //   to false signaling to setters that _synchronize needs to be called again.
-    void ApplicationState::_synchronize() const noexcept
-    {
-        // Adding some delay to the write allows us to batch multiple changes together
-        // and gives us an upper limit of writes per second in case something goes wrong.
-        int64_t relativeDueTime = -1 * 10000000; // 1s, but FILETIME is measured in 100ns increments
-        SetThreadpoolTimerEx(_timer.get(), reinterpret_cast<PFILETIME>(&relativeDueTime), 0, 0);
-    }
-
-    void ApplicationState::_synchronizeCallback(PTP_CALLBACK_INSTANCE /*instance*/, PVOID context, PTP_TIMER /*timer*/) noexcept {
-        static_cast<ApplicationState*>(context)->_write();
-    }
 
     // Deserializes the state.json at _path into this ApplicationState.
     // * *ANY* errors will result in the creation of a new empty state.
@@ -130,9 +110,7 @@ namespace winrt::Microsoft::Terminal::Settings::Model::implementation
         Json::Value root{ Json::objectValue };
 
         {
-            auto state = _state.lock();
-            state->_writeScheduled = false;
-
+            auto state = _state.lock_shared();
 #define MTSM_APPLICATION_STATE_GEN(type, name, ...) JsonUtils::SetValueForKey(root, name##Key, state->name);
             MTSM_APPLICATION_STATE_FIELDS(MTSM_APPLICATION_STATE_GEN)
 #undef MTSM_APPLICATION_STATE_GEN
