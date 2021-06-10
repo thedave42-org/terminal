@@ -85,11 +85,15 @@ namespace til
     public:
         using Func = std::function<void(Args...)>;
 
-        throttled_func(winrt::Windows::Foundation::TimeSpan delay, Func func) :
+        throttled_func(std::chrono::duration<int64_t, std::ratio<1, 10000000>> delay, Func func) :
             _delay{ -delay.count() },
             _func{ std::move(func) },
             _timer{ winrt::check_pointer(CreateThreadpoolTimer(&_timer_callback, this, nullptr)) }
         {
+            if (_delay >= 0)
+            {
+                throw std::invalid_argument("non-positive delay specified");
+            }
         }
 
         // throttled_func uses its `this` pointer when creating _timer.
@@ -165,7 +169,7 @@ namespace til
             SetThreadpoolTimerEx(_timer.get(), reinterpret_cast<PFILETIME>(&_delay), 0, 0);
         }
 
-        static void _timer_callback(PTP_CALLBACK_INSTANCE instance, PVOID context, PTP_TIMER timer) noexcept
+        static void _timer_callback(PTP_CALLBACK_INSTANCE /*instance*/, PVOID context, PTP_TIMER /*timer*/) noexcept
         try
         {
             auto& self = *static_cast<throttled_func*>(context);
