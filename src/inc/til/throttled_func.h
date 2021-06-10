@@ -26,18 +26,18 @@ namespace til
             {
                 std::scoped_lock guard{ _lock };
 
-                if (_pendingRunArgs.has_value())
+                if (_pendingRunArgs)
                 {
-                    std::apply(f, _pendingRunArgs.value());
+                    std::apply(f, *_pendingRunArgs);
                 }
             }
 
-            std::tuple<Args...> extract()
+            std::optional<std::tuple<Args...>> extract()
             {
-                decltype(_pendingRunArgs) args;
+                std::optional<std::tuple<Args...>> args;
                 std::scoped_lock guard{ _lock };
                 _pendingRunArgs.swap(args);
-                return args.value();
+                return args;
             }
 
         private:
@@ -72,20 +72,23 @@ namespace til
         };
     } // namespace details
 
-    // Class Description:
-    // - Represents a function that takes arguments and whose invocation is
-    //   delayed by a specified duration and rate-limited such that if the code
-    //   tries to run the function while a call to the function is already
-    //   pending, then the previous call with the previous arguments will be
-    //   cancelled and the call will be made with the new arguments instead.
-    // - The function will be run on the the specified dispatcher.
     template<bool leading, typename... Args>
     class throttled_func
     {
     public:
+        using FiletimeDuration = std::chrono::duration<int64_t, std::ratio<1, 10000000>>;
         using Func = std::function<void(Args...)>;
 
-        throttled_func(std::chrono::duration<int64_t, std::ratio<1, 10000000>> delay, Func func) :
+        // Throttles invocations to the given `func` to not occur more often than `delay`.
+        //
+        // If this is a:
+        // * leading_throttled_func: `func` will be invoked immediately and
+        //   further invocations prevented until `delay` time has passed.
+        // * leading_throttled_func: On the first invocation a timer of `delay` time will
+        //   be started. After the timer has expired `func` will be invoked just once.
+        //
+        // After `func` was invoked the state is reset and this cycle is repeated again.
+        throttled_func(FiletimeDuration delay, Func func) :
             _delay{ -delay.count() },
             _func{ std::move(func) },
             _timer{ winrt::check_pointer(CreateThreadpoolTimer(&_timer_callback, this, nullptr)) }
@@ -103,17 +106,10 @@ namespace til
         throttled_func(throttled_func&&) = delete;
         throttled_func& operator=(throttled_func&&) = delete;
 
-        // Method Description:
-        // - Runs the function later with the specified arguments, except if it
-        //   is called again before with new arguments, in which case the new
-        //   arguments will be used instead.
-        // - For more information, read the class' documentation.
-        // - This method is always thread-safe. It can be called multiple times on
-        //   different threads.
-        // Arguments:
-        // - args: the arguments to pass to the function
-        // Return Value:
-        // - <none>
+        // Throttles the invocation of the function passed to the constructor.
+        // If this is a trailing_throttled_func:
+        //   If you call this function again before the underlying
+        //   timer has expired, the new arguments will be used.
         template<typename... MakeArgs>
         void operator()(MakeArgs&&... args)
         {
@@ -123,39 +119,34 @@ namespace til
             }
         }
 
-        // Method Description:
-        // - Modifies the pending arguments for the next function invocation, if
-        //   there is one pending currently.
-        // - Let's say that you just called the `operator()` method with some arguments.
-        //   After the delay specified in the constructor, the function specified
-        //   in the constructor will be called with these arguments.
-        // - By using this method, you can modify the arguments before the function
-        //   is called.
-        // - You pass a function to this method which will take references to
-        //   the arguments (one argument corresponds to one reference to an
-        //   argument) and will modify them.
-        // - When there is no pending invocation of the function, this method will
-        //   not do anything.
-        // - This method is always thread-safe. It can be called multiple times on
-        //   different threads.
-        // Arguments:
-        // - f: the function to call with references to the arguments
-        // Return Value:
-        // - <none>
+        // Modifies the pending arguments for the next function
+        // invocation, if there is one pending currently.
+        // 
+        // `func` will be invoked as func(Args...). Make sure to bind any
+        // arguments in `func` by reference if you'd like to modify them.
         template<typename F>
-        void modify_pending(F f)
+        void modify_pending(F func)
         {
-            _storage.modify_pending(f);
+            _storage.modify_pending(func);
         }
 
-        // Method Description:
-        // - Makes sure that all outstanding timers are canceled and
-        //   in-progress ones are awaited on for their completion.
-        // - Reason for its existence: We have code that needs to explicitly
-        //   ensure that the throttled_func will not call the callback anymore.
-        void wait_for_completion()
+        // Makes sure that the currently pending timer is executed
+        // as soon as possible and in that case waits for its completion.
+        void flush()
         {
             WaitForThreadpoolTimerCallbacks(_timer.get(), true);
+
+            if constexpr (leading)
+            {
+                self._storage.reset();
+            }
+            else
+            {
+                if (auto arguments{ _storage.extract() })
+                {
+                    std::apply(self._func, std::move(*arguments));
+                }
+            }
         }
 
     private:
@@ -180,7 +171,7 @@ namespace til
             }
             else
             {
-                std::apply(self._func, self._storage.extract());
+                std::apply(self._func, *self._storage.extract());
             }
         }
         CATCH_LOG()

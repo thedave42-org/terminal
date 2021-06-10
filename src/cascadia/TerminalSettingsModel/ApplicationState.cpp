@@ -35,17 +35,8 @@ namespace winrt::Microsoft::Terminal::Settings::Model::implementation
     ApplicationState::~ApplicationState()
     {
         // In order to flush the last write to disk as soon as possible,
-        // pending timers and wait for the completion of ongoing writes
-        // (the destructor of wil::unique_threadpool_timer ensures to either
-        // cancel pending timers or wait for in-progress callbacks to complete).
-        //
-        // If _writeScheduled is still true afterwards we must've
-        // canceled a pending timer. -> _write() for the last time.
-        _throttler.wait_for_completion();
-        if (_state.lock_shared()->_writeScheduled)
-        {
-            _write();
-        }
+        // pending timers and wait for the completion of ongoing writes.
+        _throttler.flush();
     }
 
     void ApplicationState::Reload() const noexcept
