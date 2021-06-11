@@ -43,6 +43,9 @@ jobs:
       
     - name: setup-msbuild
       uses: microsoft/setup-msbuild@v1
+      
+    - name: Setup VSWhere.exe
+      uses: warrenbuckley/Setup-VSWhere@v1
 
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL
