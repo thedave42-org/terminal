@@ -24,10 +24,6 @@ jobs:
   analyze:
     name: Analyze
     runs-on: windows-2019
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
 
     strategy:
       fail-fast: false
